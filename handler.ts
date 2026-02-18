@@ -8,14 +8,25 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
+
+console.log('[auto-tts] Handler loaded at:', new Date().toISOString());
 
 const execAsync = promisify(exec);
 
 const HOOK_KEY = "auto-tts";
-const HOOK_SCRIPT = `${process.env.HOME}/.openclaw/hooks/auto-tts/auto-tts.js`;
-const CONFIG_FILE = `${process.env.HOME}/.openclaw/hooks/auto-tts/config.json`;
+const HOOK_SCRIPT = `${process.env.HOME}/.openclaw/workspace/hooks/auto-tts/auto-tts.js`;
+const CONFIG_FILE = `${process.env.HOME}/.openclaw/workspace/hooks/auto-tts/config.json`;
+
+/**
+ * Remove emojis from text for TTS (simplified)
+ */
+function stripEmojis(text: string): string {
+  // Match all common emojis including sleeping face 💤
+  return text.replace(/[\u{1F600}-\u{1F9FF}\u{2600}-\u{27BF}\u{1F000}-\u{1F02F}]/gu, '').trim();
+}
 
 /**
  * Read hook config from JSON file
@@ -25,7 +36,6 @@ async function readConfig() {
     const content = await fs.readFile(CONFIG_FILE, "utf-8");
     return JSON.parse(content);
   } catch {
-    // Default config
     return { enabled: true };
   }
 }
@@ -34,40 +44,41 @@ async function readConfig() {
  * Main hook handler
  */
 const autoTtsHook = async (event) => {
-  // Check if this is a session event with message content
-  if (event.type !== "session") {
+  console.log('[auto-tts] Hook triggered! type:', event.type, 'action:', event.action);
+  
+  if (event.type !== "message" || event.action !== "send") {
     return;
   }
 
-  // Only process message-related events
-  const validActions = ["message", "send", "reply", "response"];
-  if (!validActions.includes(event.action)) {
-    return;
-  }
-
-  // Get the message text from context
   const context = event.context || {};
-  const messageText = context.text;
+  let messageText = context.text;
+  
+  console.log('[auto-tts] Original text:', messageText);
   
   if (!messageText || typeof messageText !== "string" || messageText.trim().length === 0) {
     return;
   }
 
-  // Skip very long messages (TTS would take too long)
+  // Strip emojis for TTS
+  messageText = stripEmojis(messageText);
+  console.log('[auto-tts] Text for TTS:', messageText);
+
+  if (!messageText || messageText.length === 0) {
+    return;
+  }
+
   if (messageText.length > 500) {
     console.log("[auto-tts] Message too long, skipping TTS");
     return;
   }
 
   try {
-    // Read hook config
     const config = await readConfig();
     
     if (!config.enabled) {
       return;
     }
 
-    // Build command
     const voice = config.voice ? `--voice "${config.voice}"` : "";
     const rate = config.rate ? `--rate "${config.rate}"` : "";
     const volume = config.volume ? `--volume "${config.volume}"` : "";
@@ -77,13 +88,11 @@ const autoTtsHook = async (event) => {
     
     console.log(`[auto-tts] Playing: "${messageText.substring(0, 50)}..."`);
     
-    // Run TTS in background (non-blocking)
     execAsync(cmd, { timeout: 90000 }).catch(err => {
       console.error("[auto-tts] Failed:", err.message);
     });
     
   } catch (err) {
-    // Silent failure - TTS is optional
     console.debug("[auto-tts] Error:", err.message || String(err));
   }
 };

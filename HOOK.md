@@ -7,7 +7,7 @@ metadata:
     "openclaw":
       {
         "emoji": "🔊",
-        "events": ["session"],
+        "events": ["message:send"],
         "install": [{ "id": "auto-tts", "kind": "workspace", "label": "Auto TTS Hook" }],
       },
   }
