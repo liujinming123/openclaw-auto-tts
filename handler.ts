@@ -29,6 +29,13 @@ function stripEmojis(text: string): string {
 }
 
 /**
+ * Remove asterisks from text for TTS
+ */
+function stripAsterisks(text: string): string {
+  return text.replace(/\*/g, '').trim();
+}
+
+/**
  * Read hook config from JSON file
  */
 async function readConfig() {
@@ -59,8 +66,9 @@ const autoTtsHook = async (event) => {
     return;
   }
 
-  // Strip emojis for TTS
+  // Strip emojis and asterisks for TTS
   messageText = stripEmojis(messageText);
+  messageText = stripAsterisks(messageText);
   console.log('[auto-tts] Text for TTS:', messageText);
 
   if (!messageText || messageText.length === 0) {
@@ -83,14 +91,20 @@ const autoTtsHook = async (event) => {
     const rate = config.rate ? `--rate "${config.rate}"` : "";
     const volume = config.volume ? `--volume "${config.volume}"` : "";
     
-    const escapedText = messageText.replace(/"/g, '\\"');
-    const cmd = `node "${HOOK_SCRIPT}" "${escapedText}" ${voice} ${rate} ${volume}`;
+    // Write text to temp file to avoid shell escaping issues
+    const tmpFile = `${process.env.HOME}/.openclaw/workspace/hooks/auto-tts/.tts-text-${Date.now()}.txt`;
+    await fs.writeFile(tmpFile, messageText, 'utf-8');
+    
+    const cmd = `node "${HOOK_SCRIPT}" --file "${tmpFile}" ${voice} ${rate} ${volume}`;
     
     console.log(`[auto-tts] Playing: "${messageText.substring(0, 50)}..."`);
     
-    execAsync(cmd, { timeout: 90000 }).catch(err => {
-      console.error("[auto-tts] Failed:", err.message);
-    });
+    execAsync(cmd, { timeout: 90000 })
+      .then(() => fs.unlink(tmpFile).catch(() => {}))
+      .catch(err => {
+        console.error("[auto-tts] Failed:", err.message);
+        fs.unlink(tmpFile).catch(() => {});
+      });
     
   } catch (err) {
     console.debug("[auto-tts] Error:", err.message || String(err));
